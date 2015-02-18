@@ -1,25 +1,23 @@
 //Convention adopted: ARRAY[ROW][COLUMN]
+//THIS IS A AES-128 (16 bytes) IMPLEMENTATION
+
 
 #include <stdio.h>
 #include <stdlib.h>
 
-#define KEY_LENGTH 128 //Key length in BITS. Byte length = KEY_LENGTH/8
+#define KEY_SIZE 16
+#define EXP_KEY_SIZE 176
+#define ROUNDS 10
 
-/*
-* NUMBER OF ROUNDS
-* This depends on the length of the key:
-* 128 bits -> 10 rounds
-* 192 bits -> 12 rounds
-* 256 bits -> 14 rounds
-*/
-#define NR_ROUNDS 10
-#define EXPKEY_LENGTH ( NR_ROUNDS + 1 ) * 128 //Expanded key length in BITS.
-
-void encryptAES ( unsigned char * k, unsigned char * m, unsigned char * c );
+void encryptAES ( unsigned char * key, unsigned char * m, unsigned char * c );
 void subBytes ( );
 void shiftRows ( );
 void mixColumns ( );
 void addRoundKey ( );
+void cycleRowLeft ( unsigned char row, unsigned char n );
+unsigned char gfMult ( unsigned char a, unsigned char x );
+unsigned char gfMult2 ( unsigned char x );
+unsigned char gfMult3 ( unsigned char x );
 
 static unsigned char sbox [256] =
 {
@@ -61,12 +59,184 @@ static unsigned char rcon [256] =
   0x61, 0xc2, 0x9f, 0x25, 0x4a, 0x94, 0x33, 0x66, 0xcc, 0x83, 0x1d, 0x3a, 0x74, 0xe8, 0xcb, 0x8d
 };
 
-struct
+static unsigned char multMatrix[4][4] =
 {
-  unsigned char key [4][KEY_LENGTH/32]; //KEY in array format.
-  unsigned char expanded_key
-  unsigned char * plaintext;
-  unsigned char * ciphertext;
+    {2, 3, 1, 1},
+    {1, 2, 3, 1},
+    {1, 1, 2, 3},
+    {3, 1, 1, 2}
+};
 
-  unsigned char state[4][4];
-} job;
+unsigned char state[4][4];
+
+void cycleRowLeft ( unsigned char row, unsigned char n )
+//auxiliary function, cycles the specified row n slots to the left.
+{
+    unsigned char temp;
+    unsigned char i;
+
+    while ( n != 0 )
+    {
+        temp = state[row][0];
+        for ( i = 0; i < 3; i++ )
+            state[row][i] = state[row][i + 1];
+        state[row][3] = temp;
+
+        n--;
+    }
+}
+
+unsigned char gfMult ( unsigned char a, unsigned char x )
+//auxiliary wrapper function, multiplies x with a constant (a), which takes one
+//of three possible values: 1, 2 or 3. Multiplication is done in GF(2^8).
+{
+    switch ( a )
+    {
+        case 1:
+            return x;
+            break;
+        case 2:
+            return gfMult2 ( x );
+            break;
+        case 3:
+            return gfMult3 ( x );
+            break;
+        default:
+            fprintf ( stderr, "gfMult: INVALID CONSTANT --- A = %d\n", a );
+            exit(1);
+            break;
+    }
+}
+
+unsigned char gfMult2 ( unsigned char x )
+//auxiliary function, multiplies a byte with 2, following the GF(2^8) rules.
+{
+    if ( x & 0x80 ) // 0x80 = 1000 0000 -> if high of x bit is 1, this is true
+        return ( ( x << 1 ) ^ 0x1B )
+
+    return ( x << 1 );
+}
+
+unsigned char gfMult3 ( unsigned char x )
+//auxiliary function, multiplies a byte with 3, following the GF(2^8) rules.
+{
+    return gfMult2 ( x ) ^ x;
+}
+
+void addRoundKey ( unsigned char roundkey[][] )
+{
+    unsigned char i;
+    unsigned char j;
+
+    for ( i = 0; i < 4; i++ )
+        for ( j = 0; j < 4; j++ )
+            state[i][j] = state[i][j] ^ roundkey[i][j]
+}
+
+void shiftRows ( )
+{
+    unsigned char row;
+
+    for ( row = 1; row < 4; row++ )
+        cycleRowLeft ( row, row );
+}
+
+void subBytes ()
+{
+    unsigned char i;
+    unsigned char j;
+
+    for ( i = 0; i < 4; i++ )
+        for ( j = 0; j < 4; j++ )
+            state[i][j] = sbox[state[i][j]];
+}
+
+void mixColumns ()
+{
+    unsigned char i;
+    unsigned char j;
+    unsigned char res[4][4]; //holds the result of the multiplication
+
+    for ( i = 0; i < 4; i++ )
+    { //for each column
+
+        for ( j = 0; j < 4; j++ )
+        {
+            res[j][i] =
+                    gfMult ( multMatrix[j][0], state[0][i] ) ^ \
+                    gfMult ( multMatrix[j][1], state[1][i] ) ^ \
+                    gfMult ( multMatrix[j][2], state[2][i] ) ^ \
+                    gfMult ( multMatrix[j][3], state[3][i] );
+        }
+    }
+
+    for ( i = 0; i < 4; i++ )
+        for ( j = 0; j < 4; j++ )
+            state[j][i] = res[j][i];
+
+}
+
+void keySchedCore ( unsigned char * word, unsigned char i )
+//KEY SCHEDULE CORE ROUTINE
+{
+    unsigned char temp;
+    unsigned char i;
+
+    //ROTATE
+    temp = word[0];
+    for ( i = 0; i < 3; i++ )
+        word[i] = word[i + 1];
+    word[3] = temp;
+
+    //SBOX
+    for ( i = 0; i < 4; i++ )
+        word[i] = sbox[word[i]];
+
+    //RCON
+    word[0] = word[0] ^ rcon[i];
+}
+
+void expandKey ( unsigned char * key, unsigned char * exp_key )
+{
+    unsigned char size = KEY_SIZE;
+    unsigned char rcon_count = 0;
+    unsigned char word[4];
+    unsigned char i;
+
+    for ( i = 0; i < KEY_SIZE; i++ )
+        exp_key[i] = key[i];
+
+    while ( size < EXP_KEY_SIZE )
+    {
+        for ( i = size - 4; i < size; i++ )
+            word[i + 4 - size] = exp_key[i];
+
+        if ( !(size % KEY_SIZE) )
+        {
+            rcon_count++;
+            keySchedCore ( word, rcon_count );
+        }
+
+        for ( i = 0; i < 4; i++ )
+        {
+            exp_key[size] = exp_key[size - KEY_SIZE] ^ word[i];
+            size++;
+        }
+    }
+
+}
+
+void encryptAES ( unsigned char * key, unsigned char * m, unsigned char * c)
+{
+    unsigned char exp_key[EXP_KEY_SIZE];
+    unsigned char roundkey[4][4];
+    unsigned char i;
+    unsigned char j;
+
+    expandKey ( key, exp_key );
+
+    for ( j = 0; j < 4; j++ )
+        for ( i = 0; i < 4; i++ )
+            roundkey[i][j] = exp_key[( 4 * j ) + i ]
+
+}
