@@ -13,15 +13,21 @@
 #define ROUNDS 10
 #define BLOCK_SIZE 16
 
-void encryptAES ( unsigned char * key, unsigned char * m, unsigned char * c );
 void subBytes ( );
 void shiftRows ( );
 void mixColumns ( );
-void addRoundKey ( );
+void addRoundKey ( unsigned char * exp_key, unsigned char r_count );
 void cycleRowLeft ( unsigned char row, unsigned char n );
 unsigned char gfMult ( unsigned char a, unsigned char x );
 unsigned char gfMult2 ( unsigned char x );
 unsigned char gfMult3 ( unsigned char x );
+void keySchedCore ( unsigned char * word, unsigned char iter );
+void expandKey ( unsigned char * key, unsigned char * exp_key );
+void encryptBlockAES ( unsigned char * exp_key );
+void encryptAES ( unsigned char * key,
+                    unsigned char * m,
+                    unsigned char * c,
+                    size_t length );
 
 static unsigned char sbox [256] = //Precalculated RINJDAEL SBOX
 {
@@ -117,7 +123,7 @@ unsigned char gfMult2 ( unsigned char x )
 //auxiliary function, multiplies a byte with 2, following the GF(2^8) rules.
 {
     if ( x & 0x80 ) // 0x80 = 1000 0000 -> if high of x bit is 1, this is true
-        return ( ( x << 1 ) ^ 0x1B )
+        return ( ( x << 1 ) ^ 0x1B );
 
     return ( x << 1 );
 }
@@ -183,7 +189,7 @@ void mixColumns ()
 
 }
 
-void keySchedCore ( unsigned char * word, unsigned char i )
+void keySchedCore ( unsigned char * word, unsigned char iter )
 //KEY SCHEDULE CORE ROUTINE
 {
     unsigned char temp;
@@ -200,7 +206,7 @@ void keySchedCore ( unsigned char * word, unsigned char i )
         word[i] = sbox[word[i]];
 
     //RCON
-    word[0] = word[0] ^ rcon[i];
+    word[0] = word[0] ^ rcon[iter];
 }
 
 void expandKey ( unsigned char * key, unsigned char * exp_key )
@@ -238,7 +244,7 @@ void expandKey ( unsigned char * key, unsigned char * exp_key )
 void encryptBlockAES ( unsigned char * exp_key )
 //basically, encrypts whatever is on the state at the moment
 {
-    unsigned char r_count;
+    unsigned char r_count = 0;
 
     addRoundKey ( exp_key, r_count );
 
@@ -271,7 +277,7 @@ void encryptAES ( unsigned char * key,
     //length is the lenght of both arrays
 
     unsigned char exp_key[EXP_KEY_SIZE];
-    int n_blocks = lenght / BLOCK_SIZE; //Nr of blocks to process
+    int n_blocks = length / BLOCK_SIZE; //Nr of blocks to process
     unsigned char i;
     unsigned char col;
     unsigned char row;
@@ -297,21 +303,22 @@ int main ( int argc, char *argv[] )
 {
 
     FILE *in;
-    FILE *out;
     unsigned char key[KEY_SIZE];
     unsigned char * m; //here we'll store the plaintext as an array of bytes!
     unsigned char * c; //and here goes the ciphertext
     unsigned char * temp;
-    int rest;
-    long len; //lenght of the char array and file
+    size_t rest;
+    size_t n_blocks;
+    size_t len; //lenght of the char array and file
+    size_t plen; //padded length
     int i;
 
     if ( argc != 2 )
     {
         fprintf ( stderr, "Invalid number of arguments!\n");
-        fprintf ( stderr, "Usage: > aes_impl <file>\nWhere the first 16 bytes \
-                            of <file> correspond to the key, and the rest to \
-                            the plaintext to be encrypted.\n");
+        fprintf ( stderr, "Usage: aes_impl <file>\nWhere the first 16 bytes "
+                            "of <file> correspond to the key, and the rest to "
+                            "the plaintext to be encrypted.\n");
         exit(1);
     }
 
@@ -319,7 +326,7 @@ int main ( int argc, char *argv[] )
     fseek ( in, 0, SEEK_END );
     len = ftell ( in );
     rewind ( in );
-    temp = ( char * ) malloc ( len * sizeof ( char ) );
+    temp = ( unsigned char * ) malloc ( len * sizeof ( char ) );
     fread ( temp, len, 1, in );
     fclose ( in );
 
@@ -328,15 +335,33 @@ int main ( int argc, char *argv[] )
 
     len -= KEY_SIZE;
     rest = len % BLOCK_SIZE;
+    n_blocks = len / BLOCK_SIZE;
+    plen = len;
 
     if ( rest ) //we add space for padding in case the size of the plaintext is
                 //not divisible by the block size.
     {
-        m = ( char * ) malloc ( ( len + (BLOCK_SIZE - rest) ) * sizeof ( char ) );
-        len += (BLOCK_SIZE - rest);
+        n_blocks++;
+        plen = BLOCK_SIZE * n_blocks;
     }
-    else
-        m = ( char * ) malloc ( len * sizeof ( char ) );
 
+    fprintf ( stdout, "Size of plaintext: %d\n", ( unsigned int ) len );
+    fprintf ( stdout, "Size of padded plaintext: %d\n", ( unsigned int ) plen );
 
+    m = ( unsigned char * ) malloc ( plen * sizeof ( char ) );
+    c = ( unsigned char * ) malloc ( plen * sizeof ( char ) );
+
+    for ( i = 0; i < len; i++ )
+        m[i] = temp[KEY_SIZE + i];
+
+    for ( i = len; i < plen; i++ )
+        m[i] = 0;
+
+    encryptAES ( key, m, c, plen );
+
+    fprintf( stdout, "%s", c );
+    fflush ( stdout );
+
+    free ( m );
+    free ( c );
 }
