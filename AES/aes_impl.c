@@ -8,6 +8,7 @@
 #define KEY_SIZE 16
 #define EXP_KEY_SIZE 176
 #define ROUNDS 10
+#define BLOCK_SIZE 16
 
 void encryptAES ( unsigned char * key, unsigned char * m, unsigned char * c );
 void subBytes ( );
@@ -123,14 +124,15 @@ unsigned char gfMult3 ( unsigned char x )
     return gfMult2 ( x ) ^ x;
 }
 
-void addRoundKey ( unsigned char roundkey[][] )
+void addRoundKey ( unsigned char * exp_key, unsigned char r_count )
+//adds a roundkey to the state according to the current round count
 {
     unsigned char i;
     unsigned char j;
 
     for ( i = 0; i < 4; i++ )
         for ( j = 0; j < 4; j++ )
-            state[i][j] = state[i][j] ^ roundkey[i][j]
+            state[j][i] = state[j][i] ^ exp_key[ KEY_SIZE * r_count + (( 4 * j ) + i ) ];
 }
 
 void shiftRows ( )
@@ -226,17 +228,51 @@ void expandKey ( unsigned char * key, unsigned char * exp_key )
 
 }
 
-void encryptAES ( unsigned char * key, unsigned char * m, unsigned char * c)
+
+void encryptBlockAES ( unsigned char * exp_key )
+{
+    unsigned char r_count = 0;
+
+    addRoundKey ( exp_key, r_count );
+
+    for ( r_count = 1; r_count < ROUNDS - 1; r_count++ )
+    {
+        subBytes();
+        shiftRows();
+        mixColumns();
+        addRoundKey ( exp_key, r_count );
+    }
+
+    subBytes();
+    shiftRows();
+    addRoundKey ( exp_key, r_count );
+}
+
+void encryptAES ( unsigned char * key,
+                    unsigned char * m,
+                    unsigned char * c,
+                    size_t length )
 {
     unsigned char exp_key[EXP_KEY_SIZE];
-    unsigned char roundkey[4][4];
+    int n_blocks;
+    unsigned char rest;
     unsigned char i;
     unsigned char j;
 
+    n_blocks = length / BLOCK_SIZE;
+    n_blocks = ( rest = length % BLOCK_SIZE ) ? ( n_blocks + 1) : n_blocks;
+
     expandKey ( key, exp_key );
 
-    for ( j = 0; j < 4; j++ )
-        for ( i = 0; i < 4; i++ )
-            roundkey[i][j] = exp_key[( 4 * j ) + i ]
+    for ( i = 0; i < n_blocks; i++ )
+    //ENCRYPT EACH BLOCK SEPARATELY
+    {
+        //operar especial en caso de ser ultimo bloque
+        //mapear mensaje a estado
 
+        encryptBlockAES ( exp_key );
+
+        //mapear estado a cipher 
+
+    }
 }
