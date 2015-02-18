@@ -1,6 +1,9 @@
 //Convention adopted: ARRAY[ROW][COLUMN]
 //THIS IS A AES-128 (16 bytes) IMPLEMENTATION
 
+/* Author: Manuel Osvaldo Olguin Munoz */
+/* molguin@dcc.uchile.cl || mojom@kth.se */
+/* Universidad de Chile || KTH Royal Institute of Technology */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,7 +23,7 @@ unsigned char gfMult ( unsigned char a, unsigned char x );
 unsigned char gfMult2 ( unsigned char x );
 unsigned char gfMult3 ( unsigned char x );
 
-static unsigned char sbox [256] =
+static unsigned char sbox [256] = //Precalculated RINJDAEL SBOX
 {
   0x63, 0x7C, 0x77, 0x7B, 0xF2, 0x6B, 0x6F, 0xC5, 0x30, 0x01, 0x67, 0x2B, 0xFE, 0xD7, 0xAB, 0x76,
   0xCA, 0x82, 0xC9, 0x7D, 0xFA, 0x59, 0x47, 0xF0, 0xAD, 0xD4, 0xA2, 0xAF, 0x9C, 0xA4, 0x72, 0xC0,
@@ -40,7 +43,7 @@ static unsigned char sbox [256] =
   0x8C, 0xA1, 0x89, 0x0D, 0xBF, 0xE6, 0x42, 0x68, 0x41, 0x99, 0x2D, 0x0F, 0xB0, 0x54, 0xBB, 0x16
 };
 
-static unsigned char rcon [256] =
+static unsigned char rcon [256] = //Precalculated RCon
 {
   0x8d, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36, 0x6c, 0xd8, 0xab, 0x4d, 0x9a,
   0x2f, 0x5e, 0xbc, 0x63, 0xc6, 0x97, 0x35, 0x6a, 0xd4, 0xb3, 0x7d, 0xfa, 0xef, 0xc5, 0x91, 0x39,
@@ -61,6 +64,7 @@ static unsigned char rcon [256] =
 };
 
 static unsigned char multMatrix[4][4] =
+//Matrix used in the MixColumns steps
 {
     {2, 3, 1, 1},
     {1, 2, 3, 1},
@@ -68,7 +72,7 @@ static unsigned char multMatrix[4][4] =
     {3, 1, 1, 2}
 };
 
-unsigned char state[4][4];
+unsigned char state[4][4]; //state of the cipher
 
 void cycleRowLeft ( unsigned char row, unsigned char n )
 //auxiliary function, cycles the specified row n slots to the left.
@@ -132,10 +136,10 @@ void addRoundKey ( unsigned char * exp_key, unsigned char r_count )
 
     for ( i = 0; i < 4; i++ )
         for ( j = 0; j < 4; j++ )
-            state[j][i] = state[j][i] ^ exp_key[ KEY_SIZE * r_count + (( 4 * j ) + i ) ];
+            state[j][i] = state[j][i] ^ exp_key[ KEY_SIZE * r_count + (( 4 * i ) + j ) ];
 }
 
-void shiftRows ( )
+void shiftRows ()
 {
     unsigned char row;
 
@@ -144,6 +148,7 @@ void shiftRows ( )
 }
 
 void subBytes ()
+//Sbox lookup, basically
 {
     unsigned char i;
     unsigned char j;
@@ -199,6 +204,7 @@ void keySchedCore ( unsigned char * word, unsigned char i )
 }
 
 void expandKey ( unsigned char * key, unsigned char * exp_key )
+//Expands the 16 byte key into 176 bytes of roundkeys
 {
     unsigned char size = KEY_SIZE;
     unsigned char rcon_count = 0;
@@ -209,11 +215,12 @@ void expandKey ( unsigned char * key, unsigned char * exp_key )
         exp_key[i] = key[i];
 
     while ( size < EXP_KEY_SIZE )
+    //while we haven't reached the desired key lenght, keep expanding!
     {
         for ( i = size - 4; i < size; i++ )
             word[i + 4 - size] = exp_key[i];
 
-        if ( !(size % KEY_SIZE) )
+        if ( !(size % KEY_SIZE) ) //Every 16 bytes we run the core again.
         {
             rcon_count++;
             keySchedCore ( word, rcon_count );
@@ -228,14 +235,15 @@ void expandKey ( unsigned char * key, unsigned char * exp_key )
 
 }
 
-
 void encryptBlockAES ( unsigned char * exp_key )
+//basically, encrypts whatever is on the state at the moment
 {
-    unsigned char r_count = 0;
+    unsigned char r_count;
 
     addRoundKey ( exp_key, r_count );
 
     for ( r_count = 1; r_count < ROUNDS - 1; r_count++ )
+    //firs n-1 rounds
     {
         subBytes();
         shiftRows();
@@ -243,6 +251,7 @@ void encryptBlockAES ( unsigned char * exp_key )
         addRoundKey ( exp_key, r_count );
     }
 
+    //Last round, no MixColumns
     subBytes();
     shiftRows();
     addRoundKey ( exp_key, r_count );
@@ -253,26 +262,81 @@ void encryptAES ( unsigned char * key,
                     unsigned char * c,
                     size_t length )
 {
-    unsigned char exp_key[EXP_KEY_SIZE];
-    int n_blocks;
-    unsigned char rest;
-    unsigned char i;
-    unsigned char j;
+    //OBS: This function assumes the message to encrypt, m, is of appropiate
+    //lenght, i.e. lenght(m) % BLOCK_SIZE = 0!
 
-    n_blocks = length / BLOCK_SIZE;
-    n_blocks = ( rest = length % BLOCK_SIZE ) ? ( n_blocks + 1) : n_blocks;
+    //key is the cipher key
+    //m is the original plaintext, PADDED with 0 to fit the block lenght
+    //c is the final ciphertext
+    //length is the lenght of both arrays
+
+    unsigned char exp_key[EXP_KEY_SIZE];
+    int n_blocks = lenght / BLOCK_SIZE; //Nr of blocks to process
+    unsigned char i;
+    unsigned char col;
+    unsigned char row;
 
     expandKey ( key, exp_key );
 
     for ( i = 0; i < n_blocks; i++ )
     //ENCRYPT EACH BLOCK SEPARATELY
     {
-        //operar especial en caso de ser ultimo bloque
-        //mapear mensaje a estado
+        for ( col = 0; col < 4; col++ )
+            for ( row = 0; row < 4; row++ )
+                state[row][col] = m[(4 * col) + row + (i * BLOCK_SIZE)];
 
         encryptBlockAES ( exp_key );
 
-        //mapear estado a cipher 
-
+        for ( col = 0; col < 4; col++ )
+            for ( row = 0; row < 4; row++ )
+                c[(4 * col) + row + (i * BLOCK_SIZE)] = state[row][col];
     }
+}
+
+int main ( int argc, char *argv[] )
+{
+
+    FILE *in;
+    FILE *out;
+    unsigned char key[KEY_SIZE];
+    unsigned char * m; //here we'll store the plaintext as an array of bytes!
+    unsigned char * c; //and here goes the ciphertext
+    unsigned char * temp;
+    int rest;
+    long len; //lenght of the char array and file
+    int i;
+
+    if ( argc != 2 )
+    {
+        fprintf ( stderr, "Invalid number of arguments!\n");
+        fprintf ( stderr, "Usage: > aes_impl <file>\nWhere the first 16 bytes \
+                            of <file> correspond to the key, and the rest to \
+                            the plaintext to be encrypted.\n");
+        exit(1);
+    }
+
+    in = fopen( argv[1], "r" );
+    fseek ( in, 0, SEEK_END );
+    len = ftell ( in );
+    rewind ( in );
+    temp = ( char * ) malloc ( len * sizeof ( char ) );
+    fread ( temp, len, 1, in );
+    fclose ( in );
+
+    for ( i = 0; i < KEY_SIZE; i++ )
+        key[i] = temp[i];
+
+    len -= KEY_SIZE;
+    rest = len % BLOCK_SIZE;
+
+    if ( rest ) //we add space for padding in case the size of the plaintext is
+                //not divisible by the block size.
+    {
+        m = ( char * ) malloc ( ( len + (BLOCK_SIZE - rest) ) * sizeof ( char ) );
+        len += (BLOCK_SIZE - rest);
+    }
+    else
+        m = ( char * ) malloc ( len * sizeof ( char ) );
+
+
 }
