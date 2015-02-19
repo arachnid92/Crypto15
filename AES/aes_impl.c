@@ -24,11 +24,7 @@ unsigned char gfMult2 ( unsigned char x );
 unsigned char gfMult3 ( unsigned char x );
 void keySchedCore ( unsigned char * word, unsigned char iter );
 void expandKey ( unsigned char * key, unsigned char * exp_key );
-void encryptBlockAES ( unsigned char * exp_key );
-void encryptAES ( unsigned char * key,
-                    unsigned char * m,
-                    unsigned char * c,
-                    size_t length );
+void encryptAES ( unsigned char * exp_key, unsigned char * m, unsigned char * c);
 
 static unsigned char sbox [256] = /* Precalculated RINJDAEL SBOX */
 {
@@ -242,15 +238,27 @@ void expandKey ( unsigned char * key, unsigned char * exp_key )
 
 }
 
-void encryptBlockAES ( unsigned char * exp_key )
-/* basically, encrypts whatever is on the state at the moment */
+void encryptAES ( unsigned char * exp_key, unsigned char * m, unsigned char * c)
 {
+    /* OBS: This function encrypts ONE block.
+
+    exp_key is the expanded cipher key
+    m is the original plaintext
+    c is the final ciphertext */
+
+    unsigned char i;
+    unsigned char col;
+    unsigned char row;
     unsigned char r_count = 0;
+
+    for ( col = 0; col < 4; col++ )
+        for ( row = 0; row < 4; row++ )
+            state[row][col] = m[ col * 4 + row ];
 
     addRoundKey ( exp_key, r_count );
 
-    for ( r_count = 1; r_count < ROUNDS - 1; r_count++ )
-    /* firs n-1 rounds */
+    for ( r_count = 1; r_count < ROUNDS; r_count++ )
+    /* first n-1 rounds */
     {
         subBytes();
         shiftRows();
@@ -262,61 +270,30 @@ void encryptBlockAES ( unsigned char * exp_key )
     subBytes();
     shiftRows();
     addRoundKey ( exp_key, r_count );
-}
 
-void encryptAES ( unsigned char * key,
-                    unsigned char * m,
-                    unsigned char * c,
-                    size_t length )
-{
-    /* OBS: This function assumes the message to encrypt, m, is of appropiate
-    lenght, i.e. lenght(m) % BLOCK_SIZE = 0!
-
-    key is the cipher key
-    m is the original plaintext, PADDED with 0 to fit the block lenght
-    c is the final ciphertext
-    length is the lenght of both arrays */
-
-    unsigned char exp_key[EXP_KEY_SIZE];
-    int n_blocks = length / BLOCK_SIZE; /* Nr of blocks to process */
-    unsigned char i;
-    unsigned char col;
-    unsigned char row;
-
-    expandKey ( key, exp_key );
-
-    for ( i = 0; i < n_blocks; i++ )
-    /* ENCRYPT EACH BLOCK SEPARATELY */
-    {
-        for ( col = 0; col < 4; col++ )
-            for ( row = 0; row < 4; row++ )
-                state[row][col] = m[(4 * col) + row + (i * BLOCK_SIZE)];
-
-        encryptBlockAES ( exp_key );
-
-        for ( col = 0; col < 4; col++ )
-            for ( row = 0; row < 4; row++ )
-                c[(4 * col) + row + (i * BLOCK_SIZE)] = state[row][col];
-    }
+    for ( col = 0; col < 4; col++ )
+        for ( row = 0; row < 4; row++ )
+            c[ col * 4 + row ] = state[row][col];
 }
 
 int main ( int argc, char *argv[] )
 {
     unsigned char key[KEY_SIZE];
+    unsigned char exp_key[EXP_KEY_SIZE];
     unsigned char plain[BLOCK_SIZE];
     unsigned char cipher[BLOCK_SIZE];
     size_t i;
 
     i = scanf ( "%16c", key );
-    /* fprintf ( stdout, "KEY: %s\n", key); */
+
+    expandKey ( key, exp_key );
 
     while ( scanf ( "%16c", plain ) != EOF )
     {
-        encryptAES ( key, plain, cipher, BLOCK_SIZE );
-        fprintf ( stdout, "%s", cipher );
+        encryptAES ( exp_key, plain, cipher);
+        if( fwrite ( cipher, sizeof ( unsigned char ), 16, stdout ) != 16 )
+            fprintf ( stderr, "ERROR: FWRITE to stdout.\n");
     }
-
-    fflush ( stdout );
+    
     return 0;
-
 }
